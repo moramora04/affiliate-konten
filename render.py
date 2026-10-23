@@ -8,6 +8,7 @@ Kolom sheet yang dipakai (judul baris 1 harus sama persis):
   No | Nama produk | Harga (Rp) | Naskah suara (ElevenLabs, ±15 dtk)
   Link gambar AI (Drive publik) | Link video 5 dtk (Drive publik)
   Link audio (Drive publik) | URL foto produk | Status
+  Nama pendek (teks di video)  <- opsional, untuk judul di layar
 Baris yang dirender: Status == "Siap render".
 """
 import csv, hashlib, io, json, os, re, subprocess, sys, urllib.request
@@ -26,6 +27,7 @@ COL = {
     "vid_ai": "Link video 5 dtk (Drive publik)",
     "audio": "Link audio (Drive publik)",
     "img_produk": "URL foto produk", "status": "Status",
+    "pendek": "Nama pendek (teks di video)",
 }
 
 def run(cmd):
@@ -114,7 +116,8 @@ def render(row):
     joined = work / "joined.mp4"
     run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(joined)])
 
-    judul = esc(nama[:30] + ("…" if len(nama) > 30 else ""))
+    pendek = (row.get(COL["pendek"]) or "").strip() or nama
+    judul = esc(pendek[:30] + ("…" if len(pendek) > 30 else ""))
     hrg = esc(f"Cuma Rp{int(harga):,}".replace(",", ".")) if harga else ""
     box = "box=1:boxcolor=black@0.55:boxborderw=24"
     vf = (f"drawtext=fontfile={FONT}:text='{judul}':fontsize=46:fontcolor=white:{box}:x=(w-tw)/2:y=170,"
