@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Racun Belanja – Cari Kode</title>
+<meta name="description" content="Ketik kode dari video untuk membuka produknya di Shopee.">
+<style>
+:root{--bg:#fff7f3;--card:#fff;--ink:#222;--mut:#6b6b6b;--brand:#ee4d2d;--line:#f1d9d1}
+@media (prefers-color-scheme:dark){:root{--bg:#161211;--card:#221c1a;--ink:#f3eeec;--mut:#b3a9a6;--line:#3a2f2c}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{position:sticky;top:0;background:var(--brand);color:#fff;padding:14px 16px 12px;z-index:2}
+h1{margin:0 0 8px;font-size:20px}
+.cari{display:flex;gap:8px}
+.cari input{flex:1;font-size:18px;padding:10px 12px;border-radius:10px;border:0;min-width:0}
+.cari button{font-size:16px;padding:0 14px;border-radius:10px;border:0;background:#fff;color:var(--brand);font-weight:700}
+.info{font-size:13px;opacity:.9;margin-top:6px}
+main{max-width:640px;margin:0 auto;padding:12px 16px 40px;display:grid;gap:10px}
+a.kartu{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px;color:inherit;text-decoration:none}
+a.kartu.sorot{outline:3px solid var(--brand)}
+.foto{width:76px;height:76px;border-radius:10px;object-fit:cover;background:#eee;flex:none}
+.kode{flex:none;width:44px;height:44px;border-radius:50%;background:var(--brand);color:#fff;font-weight:800;display:grid;place-items:center;font-size:18px}
+.teks{flex:1;min-width:0}.nama{font-weight:700}.harga{color:var(--brand);font-weight:700}
+.beli{font-size:13px;color:var(--mut)}
+.kosong{text-align:center;color:var(--mut);padding:30px}
+footer{text-align:center;font-size:12px;color:var(--mut);padding:0 16px 24px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Cari kode dari video</h1>
+  <form class="cari" onsubmit="cari();return false">
+    <input id="q" inputmode="numeric" placeholder="Ketik kode, mis. 9" autocomplete="off">
+    <button>Cari</button>
+  </form>
+  <div class="info">Ketik nomor kode yang ada di video, lalu ketuk produknya untuk membuka Shopee.</div>
+</header>
+<main id="daftar"><div class="kosong">Memuat…</div></main>
+<footer>Link di halaman ini adalah link affiliate Shopee. Harga bisa berubah, cek di Shopee.</footer>
+<script>
+let semua=[];
+const rp=n=>"Rp"+Number(n).toLocaleString("id-ID");
+const img=u=>"https://images.weserv.nl/?w=200&h=200&fit=cover&url="+encodeURIComponent(u);
+function tampil(list,sorot){
+  const d=document.getElementById("daftar");
+  if(!list.length){d.innerHTML='<div class="kosong">Kode tidak ditemukan.</div>';return}
+  d.innerHTML=list.map(p=>`<a class="kartu${p.kode==sorot?' sorot':''}" id="kode-${p.kode}" href="${p.link}" rel="nofollow sponsored">
+    <div class="kode">${p.kode}</div><img class="foto" loading="lazy" src="${img(p.foto)}" alt="">
+    <div class="teks"><div class="nama">${p.nama}</div><div class="harga">${rp(p.harga)}</div><div class="beli">Ketuk untuk beli di Shopee ›</div></div></a>`).join("");
+}
+function cari(){
+  const q=document.getElementById("q").value.trim();
+  if(!q){tampil(semua);return}
+  const n=parseInt(q,10);
+  const hasil=isNaN(n)?semua.filter(p=>p.nama.toLowerCase().includes(q.toLowerCase())):semua.filter(p=>p.kode===n);
+  tampil(hasil,n); history.replaceState(null,"","#"+q);
+}
+fetch("produk.json?v="+Date.now()).then(r=>r.json()).then(d=>{
+  semua=d.sort((a,b)=>b.kode-a.kode);
+  const h=decodeURIComponent(location.hash.slice(1));
+  if(h){document.getElementById("q").value=h;cari()}else tampil(semua);
+}).catch(()=>{document.getElementById("daftar").innerHTML='<div class="kosong">Gagal memuat daftar. Coba muat ulang.</div>'});
+</script>
+</body>
+</html>
