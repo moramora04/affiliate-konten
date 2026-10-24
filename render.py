@@ -6,7 +6,6 @@ Cara pakai di Sheet:
   - Kolom "Render": isi "Render" (atau kosong) = dirender otomatis; "Tunggu" = jangan dirender dulu.
     GitHub mengecek tiap jam.
   - Hasil: output/<No>.mp4 + catatan di output/hasil.csv (tampil otomatis di kolom "Hasil render").
-Suara ElevenLabs dibuat untuk SEMUA baris yang punya naskah (output/suara-<No>.mp4), sekali saja per naskah.
 Baris yang bahannya tidak berubah tidak dirender ulang (hemat waktu & kredit ElevenLabs).
 
 Urutan video: Video AI -> Video saya -> foto (gambar AI, foto produk, foto lain) bergantian
@@ -75,6 +74,51 @@ def tts(text):
     p.write_bytes(urllib.request.urlopen(req, timeout=120).read())
     return p
 
+MUSIK_VER = "m1"          # ganti angkanya kalau gaya musik diubah -> video dirender ulang
+MUSIK_ON = os.getenv("MUSIK", "1") != "0"   # variabel Actions MUSIK=0 -> tanpa musik
+
+def make_music():
+    """Musik latar ORIGINAL dibuat lewat kode (tanpa lagu orang lain) -> bebas hak cipta.
+    Pad akor C-Am-F-G + petikan lembut + ketukan halus, ±100 BPM, loop 38,4 dtk."""
+    p = CACHE / f"latar-{MUSIK_VER}.wav"
+    if p.exists(): return p
+    import math, struct, wave
+    sr, bpm = 22050, 100
+    beat = 60.0 / bpm
+    chords = [(261.63, 329.63, 392.00), (220.00, 261.63, 329.63),
+              (174.61, 220.00, 261.63), (196.00, 246.94, 293.66)]   # C, Am, F, G
+    bars_per = 2; total_beats = 4 * bars_per * len(chords) * 2      # 2 putaran
+    n = int(total_beats * beat * sr)
+    buf = [0.0] * n
+    def add(start, dur, freq, amp, kind="sine"):
+        s0 = int(start * sr); m = int(dur * sr)
+        for i in range(m):
+            j = s0 + i
+            if j >= n: break
+            t = i / sr
+            env = min(1.0, t / 0.02) * math.exp(-t * (3.0 if kind == "pluck" else 0.0)) \
+                  * (min(1.0, (dur - t) / 0.3) if kind == "pad" else 1.0)
+            v = math.sin(2 * math.pi * freq * t) + (0.35 * math.sin(4 * math.pi * freq * t) if kind == "pluck" else 0)
+            buf[j] += amp * env * v
+    for rep in range(2):
+        for ci, ch in enumerate(chords):
+            t0 = (rep * len(chords) + ci) * bars_per * 4 * beat
+            for f in ch: add(t0, bars_per * 4 * beat, f / 2, 0.10, "pad")          # pad
+            for b in range(bars_per * 4):                                             # petikan
+                add(t0 + b * beat, beat * 1.8, ch[b % 3] * 2, 0.09, "pluck")
+                add(t0 + b * beat + beat / 2, beat * 1.2, ch[(b + 1) % 3] * 2, 0.05, "pluck")
+            for b in range(bars_per * 4):                                             # kick halus
+                k0 = int((t0 + b * beat) * sr)
+                for i in range(int(0.12 * sr)):
+                    if k0 + i >= n: break
+                    t = i / sr
+                    buf[k0 + i] += 0.22 * math.exp(-t * 28) * math.sin(2 * math.pi * (110 - 600 * t * 0.2) * t)
+    mx = max(abs(x) for x in buf) or 1
+    with wave.open(str(p), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr)
+        w.writeframes(b"".join(struct.pack("<h", int(max(-1, min(1, x / mx * 0.9)) * 32767)) for x in buf))
+    return p
+
 def duration(path):
     out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
         "-of", "csv=p=0", str(path)], capture_output=True, text=True).stdout
@@ -100,7 +144,7 @@ def esc(t):
 def input_hash(row):
     keys = ["nama", "harga", "naskah", "img_ai", "vid_ai", "audio", "img_produk", "pendek",
             "vid_saya", "foto_lain", "durasi"]
-    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID).encode()).hexdigest()[:12]
+    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID + (MUSIK_VER if MUSIK_ON else "")).encode()).hexdigest()[:12]
 
 def render(row):
     no = g(row, "no")
@@ -149,9 +193,18 @@ def render(row):
             f"box=1:boxcolor=0xEE4D2D@0.95:boxborderw=26:x=(w-tw)/2:y=h-330")
     af = (f"atempo={tempo:.3f}," if tempo > 1.0 else "") + f"apad,afade=t=out:st={max(0, total-0.4):.2f}:d=0.4"
     out = OUT / f"{no}.mp4"
-    run(["ffmpeg", "-y", "-i", str(joined), "-i", str(audio), "-vf", vf, "-af", af,
-         "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-         "-c:a", "aac", "-b:a", "128k", "-t", f"{total:.2f}", "-movflags", "+faststart", str(out)])
+    if MUSIK_ON:
+        mus = make_music()
+        fc = (f"[1:a]{af}[v];[2:a]volume=0.13,afade=t=in:d=1,afade=t=out:st={max(0, total-1.2):.2f}:d=1.2[m];"
+              f"[v][m]amix=inputs=2:duration=first:normalize=0[a]")
+        run(["ffmpeg", "-y", "-i", str(joined), "-i", str(audio), "-stream_loop", "-1", "-i", str(mus),
+             "-filter_complex", fc, "-vf", vf, "-map", "0:v", "-map", "[a]",
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+             "-c:a", "aac", "-b:a", "128k", "-t", f"{total:.2f}", "-movflags", "+faststart", str(out)])
+    else:
+        run(["ffmpeg", "-y", "-i", str(joined), "-i", str(audio), "-vf", vf, "-af", af,
+             "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+             "-c:a", "aac", "-b:a", "128k", "-t", f"{total:.2f}", "-movflags", "+faststart", str(out)])
     catatan = f"Selesai {duration(out):.0f} dtk"
     if tempo > 1.0: catatan += f" (suara dipercepat {tempo:.2f}x)"
     if a_dur / 1.25 > total: catatan += " - suara terpotong, pendekkan naskah"
