@@ -16,7 +16,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 W, H, FPS = 1080, 1920, 30
-FOTO_DETIK = 3.0
+FOTO_DETIK = 2.0   # ganti foto tiap 2 dtk (lebih dinamis)
+TTS_MODEL_DEFAULT = "eleven_multilingual_v2"   # ganti ke "eleven_v4" = suara lebih natural (kredit lebih besar)
+HOOKS = ["STOP SCROLL DULU!", "WAJIB TAHU INI!", "MURAH BANGET, SERIUS!", "JANGAN SAMPAI KETINGGALAN!"]
 ROOT = Path(__file__).parent
 OUT = ROOT / "output"; CACHE = ROOT / ".cache"
 OUT.mkdir(exist_ok=True); CACHE.mkdir(exist_ok=True)
@@ -62,18 +64,25 @@ def fetch(url, ext):
         p.write_bytes(urllib.request.urlopen(req, timeout=120).read())
     return p
 
+def MODEL_KEY():
+    m = os.getenv("TTS_MODEL") or TTS_MODEL_DEFAULT
+    return "" if m == "eleven_multilingual_v2" else m   # v2 = kunci lama (cache tetap terpakai)
+
 def tts(text):
     """ElevenLabs TTS, di-cache per naskah -> kredit tidak terbuang."""
-    p = CACHE / ("tts-" + hashlib.md5((VOICE_ID + text).encode()).hexdigest() + ".mp3")
+    model = os.getenv("TTS_MODEL") or TTS_MODEL_DEFAULT
+    p = CACHE / ("tts-" + hashlib.md5((VOICE_ID + MODEL_KEY() + text).encode()).hexdigest() + ".mp3")
     if p.exists(): return p
     key = os.environ.get("ELEVENLABS_API_KEY")
     if not key: raise RuntimeError("Secret ELEVENLABS_API_KEY belum diisi dan kolom voice kosong.")
-    body = json.dumps({"text": text, "model_id": os.getenv("TTS_MODEL") or "eleven_multilingual_v2"}).encode()
+    if model in ("eleven_v3", "eleven_v4"): text = tag_text(text)
+    body = json.dumps({"text": text, "model_id": model}).encode()
     req = urllib.request.Request(f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}",
         data=body, headers={"xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg"})
     p.write_bytes(urllib.request.urlopen(req, timeout=120).read())
     return p
 
+EDIT_VER = "e2"           # versi gaya edit (hook, subtitle, kartu penutup)
 MUSIK_VER = "m1"          # ganti angkanya kalau gaya musik diubah -> video dirender ulang
 MUSIK_ON = os.getenv("MUSIK", "1") != "0"   # variabel Actions MUSIK=0 -> tanpa musik
 
@@ -125,11 +134,16 @@ def duration(path):
     try: return float(out.strip())
     except ValueError: return 0.0
 
-def clip_from_image(img, secs, out, zoom_in=True):
+def clip_from_image(img, secs, out, variant=0):
+    """4 gaya gerak bergantian: zoom-in, zoom-out, geser kanan, geser kiri."""
     frames = max(1, int(secs * FPS))
-    z = "min(zoom+0.0009,1.15)" if zoom_in else "if(eq(on,0),1.15,max(zoom-0.0009,1))"
+    cy = "ih/2-(ih/zoom/2)"
+    if variant % 4 == 0:   z, x, y = "min(zoom+0.0016,1.2)", "iw/2-(iw/zoom/2)", cy
+    elif variant % 4 == 1: z, x, y = "if(eq(on,0),1.2,max(zoom-0.0016,1))", "iw/2-(iw/zoom/2)", cy
+    elif variant % 4 == 2: z, x, y = "1.15", f"(iw-iw/zoom)*on/{frames}", cy
+    else:                  z, x, y = "1.15", f"(iw-iw/zoom)*(1-on/{frames})", cy
     vf = (f"scale={W*2}:{H*2}:force_original_aspect_ratio=increase,crop={W*2}:{H*2},"
-          f"zoompan=z='{z}':d={frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps={FPS},setsar=1")
+          f"zoompan=z='{z}':d={frames}:x='{x}':y='{y}':s={W}x{H}:fps={FPS},setsar=1")
     run(["ffmpeg", "-y", "-loop", "1", "-i", str(img), "-vf", vf, "-t", f"{secs:.2f}",
          "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "veryfast", str(out)])
 
@@ -138,13 +152,65 @@ def clip_from_video(vid, secs, out):
     run(["ffmpeg", "-y", "-i", str(vid), "-t", f"{secs:.2f}", "-vf", vf, "-an",
          "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "veryfast", str(out)])
 
+def _t(sec):
+    sec = max(0, sec); cs = int(round(sec * 100))
+    return f"{cs//360000}:{cs//6000%60:02d}:{cs//100%60:02d}.{cs%100:02d}"
+
+def make_ass(path, no, text, speech_dur, total):
+    """Subtitle ala TikTok: 3-4 kata per layar, kata yang sedang diucapkan menyala kuning,
+    + teks hook di awal dan kartu penutup. Waktu kata diperkirakan dari panjang huruf."""
+    words = text.split()
+    start = 0.15; span = max(1.0, min(speech_dur, total - 0.5) - start)
+    weights = [len(w) + 2 for w in words]; tw = float(sum(weights)) or 1.0
+    t, timed = start, []
+    for w, wt in zip(words, weights):
+        d = span * wt / tw; timed.append((w, t, d)); t += d
+    chunks, cur = [], []
+    for item in timed:
+        cur.append(item)
+        if len(cur) >= 4 or item[0][-1:] in ".?!":
+            chunks.append(cur); cur = []
+    if cur: chunks.append(cur)
+    hook = HOOKS[int(no) % len(HOOKS)] if str(no).isdigit() else HOOKS[0]
+    lines = [
+        "[Script Info]", "ScriptType: v4.00+", "PlayResX: 1080", "PlayResY: 1920", "WrapStyle: 0",
+        "ScaledBorderAndShadow: yes", "", "[V4+ Styles]",
+        "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,"
+        "Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
+        "Style: Sub,DejaVu Sans,68,&H0000F0FF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,7,0,2,70,70,560,1",
+        "Style: Hook,DejaVu Sans,84,&H00FFFFFF,&H00FFFFFF,&H002D4DEE,&H00000000,-1,0,0,0,100,100,0,0,3,18,0,8,60,60,520,1",
+        "Style: End,DejaVu Sans,110,&H00FFFFFF,&H00FFFFFF,&H002D4DEE,&H00000000,-1,0,0,0,100,100,0,0,3,26,0,5,60,60,0,1",
+        "", "[Events]", "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text"]
+    lines.append(f"Dialogue: 0,{_t(0.05)},{_t(2.6)},Hook,,0,0,0,,{{\\fad(150,200)}}{hook}")
+    for ch in chunks:
+        s, e = ch[0][1], ch[-1][1] + ch[-1][2]
+        body = "".join(f"{{\\k{max(1,int(d*100))}}}{w} " for w, _, d in ch).strip()
+        lines.append(f"Dialogue: 0,{_t(s)},{_t(e+0.05)},Sub,,0,0,0,,{body}")
+    lines.append(f"Dialogue: 1,{_t(total-2.6)},{_t(total)},End,,0,0,0,,{{\\fad(200,0)}}KODE {no}\\NCek link di bio")
+    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+def tag_text(text):
+    """Untuk model v3/v4: sisipkan penanda emosi per kalimat supaya suara tidak datar/robot."""
+    out = []
+    sent = re.findall(r"[^.!?]+[.!?]*", text)
+    for i, s in enumerate(sent):
+        s = s.strip()
+        if not s: continue
+        low = s.lower()
+        if i == 0: tag = "[cheerful]"
+        elif "link di bio" in low or i == len(sent) - 1: tag = "[cheerful]"
+        elif "harga" in low or "rp" in low or "ribu" in low or "promo" in low: tag = "[excited]"
+        else: tag = "[calm]"
+        out.append(f"{tag} {s}")
+    return " ".join(out)
+
 def esc(t):
     return t.replace("\\", "\\\\").replace(":", "\\:").replace("'", "’").replace("%", "\\%")
 
 def input_hash(row):
     keys = ["nama", "harga", "naskah", "img_ai", "vid_ai", "audio", "img_produk", "pendek",
             "vid_saya", "foto_lain", "durasi"]
-    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID + (MUSIK_VER if MUSIK_ON else "")).encode()).hexdigest()[:12]
+    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID + MODEL_KEY() + EDIT_VER + (MUSIK_VER if MUSIK_ON else "")).encode()).hexdigest()[:12]
 
 def render(row):
     no = g(row, "no")
@@ -174,7 +240,7 @@ def render(row):
     i = 0
     while left > 0.3 and fotos:
         secs = min(FOTO_DETIK, left)
-        c = work / f"c{k}.mp4"; clip_from_image(fotos[i % len(fotos)], secs, c, zoom_in=(i % 2 == 0))
+        c = work / f"c{k}.mp4"; clip_from_image(fotos[i % len(fotos)], secs, c, variant=i)
         clips.append(c); left -= secs; k += 1; i += 1
 
     lst = work / "list.txt"
@@ -191,6 +257,9 @@ def render(row):
           + (f"drawtext=fontfile={FONT}:text='{hrg}':fontsize=72:fontcolor=yellow:{box}:x=(w-tw)/2:y=290," if hrg else "")
           + f"drawtext=fontfile={FONT}:text='Kode {no} - Cek link di bio':fontsize=56:fontcolor=white:"
             f"box=1:boxcolor=0xEE4D2D@0.95:boxborderw=26:x=(w-tw)/2:y=h-330")
+    ass = work / "sub.ass"
+    make_ass(ass, no, g(row, "naskah"), a_dur / tempo, total)
+    vf += f",subtitles='{ass.resolve()}':fontsdir={Path(FONT).parent}"
     af = (f"atempo={tempo:.3f}," if tempo > 1.0 else "") + f"apad,afade=t=out:st={max(0, total-0.4):.2f}:d=0.4"
     out = OUT / f"{no}.mp4"
     if MUSIK_ON:
@@ -216,7 +285,7 @@ def voice_for(row):
     """Suara ElevenLabs per baris -> output/suara-<No>.mp4 (bisa didengar & tidak dibuat ulang)."""
     no, text = g(row, "no"), g(row, "naskah")
     if not text: raise RuntimeError("Naskah suara (kolom L) kosong.")
-    h = hashlib.md5((VOICE_ID + text).encode()).hexdigest()[:12]
+    h = hashlib.md5((VOICE_ID + MODEL_KEY() + text).encode()).hexdigest()[:12]
     out = OUT / f"suara-{no}.mp4"
     rec = HASIL_DATA.setdefault(no, {"No": no})
     if rec.get("SuaraHash") == h and out.exists():
