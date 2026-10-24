@@ -17,7 +17,13 @@ from pathlib import Path
 
 W, H, FPS = 1080, 1920, 30
 FOTO_DETIK = 2.0   # ganti foto tiap 2 dtk (lebih dinamis)
-TTS_MODEL_DEFAULT = "eleven_multilingual_v2"   # ganti ke "eleven_v4" = suara lebih natural (kredit lebih besar)
+def _cfg():
+    """Pengaturan kecil di config.json (tanpa ubah kode): tts_model, musik."""
+    try: return json.loads((Path(__file__).parent / "config.json").read_text(encoding="utf-8"))
+    except Exception: return {}
+CFG = _cfg()
+# eleven_v4 = suara natural (ada nada ceria/tenang per kalimat); eleven_multilingual_v2 = suara lama, lebih hemat kredit
+TTS_MODEL_DEFAULT = CFG.get("tts_model", "eleven_multilingual_v2")
 HOOKS = ["STOP SCROLL DULU!", "WAJIB TAHU INI!", "MURAH BANGET, SERIUS!", "JANGAN SAMPAI KETINGGALAN!"]
 ROOT = Path(__file__).parent
 OUT = ROOT / "output"; CACHE = ROOT / ".cache"
@@ -84,7 +90,7 @@ def tts(text):
 
 EDIT_VER = "e2"           # versi gaya edit (hook, subtitle, kartu penutup)
 MUSIK_VER = "m1"          # ganti angkanya kalau gaya musik diubah -> video dirender ulang
-MUSIK_ON = os.getenv("MUSIK", "1") != "0"   # variabel Actions MUSIK=0 -> tanpa musik
+MUSIK_ON = os.getenv("MUSIK", "1" if CFG.get("musik", True) else "0") != "0"   # variabel Actions MUSIK=0 -> tanpa musik
 
 def make_music():
     """Musik latar ORIGINAL dibuat lewat kode (tanpa lagu orang lain) -> bebas hak cipta.
