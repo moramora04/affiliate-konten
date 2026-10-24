@@ -11,7 +11,7 @@ Baris yang bahannya tidak berubah tidak dirender ulang (hemat waktu & kredit Ele
 Urutan video: Video AI -> Video saya -> foto (gambar AI, foto produk, foto lain) bergantian
 dengan gerak zoom, sampai durasi terpenuhi. Kalau tidak ada video sama sekali, langsung foto.
 """
-import csv, hashlib, io, json, os, re, subprocess, sys, urllib.request
+import csv, hashlib, io, json, os, re, subprocess, sys, urllib.error, urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -129,6 +129,7 @@ def make_music():
                     t = i / sr
                     buf[k0 + i] += 0.22 * math.exp(-t * 28) * math.sin(2 * math.pi * (110 - 600 * t * 0.2) * t)
     mx = max(abs(x) for x in buf) or 1
+    fade = int(0.05 * sr)
     with wave.open(str(p), "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr)
         w.writeframes(b"".join(struct.pack("<h", int(max(-1, min(1, x / mx * 0.9)) * 32767)) for x in buf))
@@ -216,7 +217,43 @@ def esc(t):
 def input_hash(row):
     keys = ["nama", "harga", "naskah", "img_ai", "vid_ai", "audio", "img_produk", "pendek",
             "vid_saya", "foto_lain", "durasi"]
-    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID + MODEL_KEY() + EDIT_VER + (MUSIK_VER if MUSIK_ON else "")).encode()).hexdigest()[:12]
+    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID + MODEL_KEY() + EDIT_VER + (MUSIK_VER if MUSIK_ON else "") + ("ai" + str(AI_SECS) if (ai_on(g(row, "no")) and (OUT / f"ai-{g(row, 'no')}.mp4").exists()) else "")).encode()).hexdigest()[:12]
+
+# ---- Klip video AI (Alibaba Wan, bayar per detik; hanya untuk No yang ada di config.json "ai_klip") ----
+AI_NOS = {str(x) for x in CFG.get("ai_klip", [])}
+AI_SECS = int(CFG.get("ai_detik", 5))
+AI_PROMPT = ("Product showcase video for online shop. Smooth slow camera push-in, gentle natural movement, "
+             "soft studio lighting, the product stays sharp and unchanged, vertical short-video style.")
+
+def ai_on(no): return str(no) in AI_NOS and bool(os.getenv("DASHSCOPE_API_KEY"))
+
+def _dash(url, body=None):
+    key = os.environ["DASHSCOPE_API_KEY"]
+    h = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
+    if body is not None: h["X-DashScope-Async"] = "enable"
+    req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, headers=h)
+    try: return json.loads(urllib.request.urlopen(req, timeout=60).read())
+    except urllib.error.HTTPError as e: raise RuntimeError(f"AI {e.code}: {e.read().decode()[:200]}")
+
+def ai_clip(no, foto_url):
+    """Buat klip AI dari foto produk. Sekali saja per produk (disimpan di output/ai-<No>.mp4)."""
+    dst = OUT / f"ai-{no}.mp4"
+    if dst.exists(): return dst
+    base = "https://dashscope-intl.aliyuncs.com/api/v1"
+    r = _dash(base + "/services/aigc/video-generation/video-synthesis", {
+        "model": "wan2.6-i2v-flash",
+        "input": {"prompt": AI_PROMPT, "img_url": foto_url},
+        "parameters": {"resolution": "720P", "duration": AI_SECS, "audio": False, "prompt_extend": True}})
+    tid = r["output"]["task_id"]
+    import time
+    for _ in range(60):
+        time.sleep(10)
+        o = _dash(f"{base}/tasks/{tid}")["output"]
+        if o["task_status"] == "SUCCEEDED":
+            dst.write_bytes(urllib.request.urlopen(o["video_url"], timeout=120).read()); return dst
+        if o["task_status"] in ("FAILED", "CANCELED", "UNKNOWN"):
+            raise RuntimeError("AI gagal: " + str(o.get("message") or o.get("code"))[:150])
+    raise RuntimeError("AI klip kelamaan")
 
 def render(row):
     no = g(row, "no")
@@ -234,6 +271,15 @@ def render(row):
     tempo = min(1.25, a_dur / (total - 0.3)) if a_dur > total - 0.3 else 1.0
 
     clips, left, k = [], total, 0
+    ai_gagal = ""
+    if ai_on(no) and g(row, "img_produk"):
+        try:
+            v = ai_clip(no, g(row, "img_produk"))
+            secs = min(duration(v) or left, left)
+            c = work / "c_ai.mp4"; clip_from_video(v, secs, c)
+            clips.append(c); left -= secs; k += 1
+        except Exception as e:
+            ai_gagal = str(e)[:100]; print("Klip AI gagal", no, "-", e)
     for url in (g(row, "vid_ai"), g(row, "vid_saya")):
         v = fetch(url, ".mp4")
         if v and left > 0.3:
@@ -283,6 +329,8 @@ def render(row):
     catatan = f"Selesai {duration(out):.0f} dtk"
     if tempo > 1.0: catatan += f" (suara dipercepat {tempo:.2f}x)"
     if a_dur / 1.25 > total: catatan += " - suara terpotong, pendekkan naskah"
+    if ai_on(no) and not ai_gagal: catatan += " + klip AI"
+    if ai_gagal: catatan += " (klip AI gagal: " + ai_gagal + ")"
     return catatan
 
 HASIL_DATA = {}
@@ -336,11 +384,11 @@ def main():
         no = g(r, "no"); rec = hasil.setdefault(no, {"No": no})
         try:
             cat = render(r); print("OK  ", no, cat)
-            rec.update({"Hasil": f"{cat} - {datetime.now(wib):%d/%m %H:%M}", "Hash": input_hash(r)})
+            rec.update({"Hasil": f"{cat} - {datetime.now(wib):%d/%m %H:%M}", "Hash": "" if "klip AI gagal" in cat else input_hash(r)})
         except Exception as e:
             gagal += 1; print("GAGAL baris", no, "-", e)
             rec.update({"Hasil": f"Gagal: {str(e)[:120]}", "Hash": ""})
-    if not todo: print("Tidak ada baris baru yang perlu dirender.")
+    if not todo: print("Tidak ada baris baru yang dicentang Render.")
     save_hasil(hasil)
     if gagal: print(f"{gagal} baris gagal dirender.")
 

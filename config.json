@@ -1,4 +1,6 @@
 {
   "tts_model": "eleven_v4",
-  "musik": true
+  "musik": true,
+  "ai_klip": [3],
+  "ai_detik": 5
 }
