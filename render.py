@@ -3,7 +3,8 @@
 Cara pakai di Sheet:
   - Isi bahan di kolom: Video AI, Video saya, Foto produk lain, Voice ElevenLabs (boleh kosong).
   - Isi "Durasi video (detik)" (kosong = ikut panjang suara).
-  - Centang kolom "Render". GitHub mengecek tiap jam dan merender baris yang dicentang.
+  - Kolom "Render": isi "Render" (atau kosong) = dirender otomatis; "Tunggu" = jangan dirender dulu.
+    GitHub mengecek tiap jam.
   - Hasil: output/<No>.mp4 + catatan di output/hasil.csv (tampil otomatis di kolom "Hasil render").
 Suara ElevenLabs dibuat untuk SEMUA baris yang punya naskah (output/suara-<No>.mp4), sekali saja per naskah.
 Baris yang bahannya tidak berubah tidak dirender ulang (hemat waktu & kredit ElevenLabs).
@@ -194,8 +195,8 @@ def main():
         if g(r, "naskah") and not g(r, "audio"):
             try: voice_for(r)
             except Exception as e: print("Suara gagal baris", g(r, "no"), "-", e)
-    # 2) Video: hanya baris yang dicentang Render dan bahannya berubah.
-    rows = [r for r in semua if g(r, "render").lower() in YA]
+    # 2) Video: semua baris KECUALI yang berisi "Tunggu", dan hanya kalau bahannya berubah.
+    rows = [r for r in semua if g(r, "render").lower() != "tunggu"]
     todo = [r for r in rows if hasil.get(g(r, "no"), {}).get("Hash") != input_hash(r)]
     wib = timezone(timedelta(hours=7)); gagal = 0
     for r in todo:
@@ -206,7 +207,7 @@ def main():
         except Exception as e:
             gagal += 1; print("GAGAL baris", no, "-", e)
             rec.update({"Hasil": f"Gagal: {str(e)[:120]}", "Hash": ""})
-    if not todo: print("Tidak ada baris baru yang dicentang Render.")
+    if not todo: print("Tidak ada baris baru yang perlu dirender.")
     save_hasil(hasil)
     if gagal: print(f"{gagal} baris gagal dirender.")
 
