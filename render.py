@@ -188,7 +188,12 @@ def main():
     src = os.getenv("SHEET_CSV_URL") or (sys.argv[1] if len(sys.argv) > 1 else "")
     if not src: sys.exit("Isi secret SHEET_CSV_URL (link CSV tab Affiliate) atau beri path CSV.")
     data = Path(src).read_text() if os.path.exists(src) else urllib.request.urlopen(src, timeout=60).read().decode()
-    semua = [r for r in csv.DictReader(io.StringIO(data)) if g(r, "no")]
+    # Judul kolom bisa dobel (mis. "No" dari data hasil yang tersembunyi) -> pakai kemunculan PERTAMA.
+    rd = csv.reader(io.StringIO(data)); header = next(rd, [])
+    idx = {}
+    for i, h in enumerate(header): idx.setdefault(h.strip(), i)
+    semua = [{h: (r[i] if i < len(r) else "") for h, i in idx.items()} for r in rd]
+    semua = [r for r in semua if g(r, "no")]
     hasil = HASIL_DATA; hasil.update(load_hasil())
     # 1) Suara: dibuat untuk semua baris yang punya naskah & kolom voice kosong (sekali saja per naskah).
     for r in semua:
