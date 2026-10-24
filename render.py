@@ -217,7 +217,7 @@ def esc(t):
 def input_hash(row):
     keys = ["nama", "harga", "naskah", "img_ai", "vid_ai", "audio", "img_produk", "pendek",
             "vid_saya", "foto_lain", "durasi"]
-    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID + MODEL_KEY() + EDIT_VER + (MUSIK_VER if MUSIK_ON else "") + ("ai" + str(AI_SECS) if (ai_on(g(row, "no")) and (OUT / f"ai-{g(row, 'no')}.mp4").exists()) else "")).encode()).hexdigest()[:12]
+    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID + MODEL_KEY() + EDIT_VER + (MUSIK_VER if MUSIK_ON else "") + ("ai" + str(AI_SECS) if ai_on(g(row, "no")) else "")).encode()).hexdigest()[:12]
 
 # ---- Klip video AI (Alibaba Wan, bayar per detik; hanya untuk No yang ada di config.json "ai_klip") ----
 AI_NOS = {str(x) for x in CFG.get("ai_klip", [])}
