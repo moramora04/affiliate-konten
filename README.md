@@ -25,7 +25,7 @@ Suara di-cache: naskah yang sama tidak dibuat dua kali, jadi kredit ElevenLabs t
 2. Ubah **Status** jadi `Siap render`.
 3. Actions → **Render video affiliate** → Run workflow (atau tunggu jadwal 05.00 WIB).
 4. Video muncul di folder `output/`. Link publik:
-   `https://raw.githubusercontent.com/moramora04/affiliate-konten/main/output/<file>.mp4`
+   `https://raw.githubusercontent.com/richbrillian/affiliate-konten/main/output/<file>.mp4`
 5. Ubah Status jadi `Video siap`, lalu `Terposting` setelah diunggah.
 
 Uji lokal: `python3 render.py contoh.csv` (butuh ffmpeg).

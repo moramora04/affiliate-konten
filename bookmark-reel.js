@@ -1,5 +1,5 @@
 (async()=>{
-const P='https://moramora04.github.io';
+const P='https://richbrillian.github.io';
 if(!location.hostname.includes('facebook.com')){alert('Buka facebook.com dulu, lalu klik bookmark ini lagi.');return;}
 const s=ms=>new Promise(r=>setTimeout(r,ms));
 const w=window.open(P+'/affiliate-konten/reel.html','reelulang','width=430,height=680');
