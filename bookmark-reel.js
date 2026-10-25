@@ -2,11 +2,12 @@
 const P='https://moramora04.github.io';
 if(!location.hostname.includes('facebook.com')){alert('Buka facebook.com dulu, lalu klik bookmark ini lagi.');return;}
 const s=ms=>new Promise(r=>setTimeout(r,ms));
-const dlg=()=>[...document.querySelectorAll('div[role=dialog]')].pop();
-const inp=()=>document.querySelector('div[role=dialog] input[type=file][accept*=video]');
-if(!inp()){alert('Halaman Buat Reel akan dibuka. Setelah terbuka, klik bookmark ini lagi.');location.href='https://www.facebook.com/reels/create';return;}
 const w=window.open(P+'/affiliate-konten/reel.html','reelulang','width=430,height=680');
 if(!w){alert('Popup diblokir. Izinkan popup untuk facebook.com lalu klik bookmark lagi.');return;}
+const dlg=()=>[...document.querySelectorAll('div[role=dialog]')].pop();
+const inp=()=>document.querySelector('div[role=dialog] input[type=file][accept*=video]');
+if(!inp()){const rb=document.querySelector('[aria-label="Reel"][role=button]');if(rb){rb.click();for(let n=0;n<20&&!inp();n++)await s(500);}}
+if(!inp()){alert('Kotak Buat Reel tidak ketemu. Buka Beranda Facebook (facebook.com), lalu klik bookmark lagi.');return;}
 let kode=null;
 window.addEventListener('message',async e=>{
 if(e.origin!==P||!e.data||e.data.type!=='reel'||kode!==null)return;
