@@ -217,7 +217,7 @@ def esc(t):
 def input_hash(row):
     keys = ["nama", "harga", "naskah", "img_ai", "vid_ai", "audio", "img_produk", "pendek",
             "vid_saya", "foto_lain", "durasi"]
-    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID + MODEL_KEY() + EDIT_VER + (MUSIK_VER if MUSIK_ON else "") + ("ai" + str(AI_SECS) if ai_on(g(row, "no")) else "") + ("loop" if g(row, "no") in LOOP_NOS else "") + ("pp" if g(row, "no") in PINGPONG_NOS else "") + ("nt" if g(row, "no") in TANPA_TEKS else "")).encode()).hexdigest()[:12]
+    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID + MODEL_KEY() + EDIT_VER + (MUSIK_VER if MUSIK_ON else "") + ("ai" + str(AI_SECS) if ai_on(g(row, "no")) else "") + ("loop" if g(row, "no") in LOOP_NOS else "") + ("pp" if g(row, "no") in PINGPONG_NOS else "") + ("nt" if g(row, "no") in TANPA_TEKS else "") + ("ar" if artis_on(g(row, "no")) else "")).encode()).hexdigest()[:12]
 
 # ---- Klip video AI (Alibaba Wan, bayar per detik; hanya untuk No yang ada di config.json "ai_klip") ----
 AI_NOS = {str(x) for x in CFG.get("ai_klip", [])}
@@ -227,6 +227,69 @@ PINGPONG_NOS = {str(x) for x in CFG.get("pingpong", [])}   # putaran ke-2 dibali
 TANPA_TEKS = {str(x) for x in CFG.get("tanpa_teks", [])}   # tanpa tulisan/subtitle di video
 AI_PROMPT = ("Product showcase video for online shop. Smooth slow camera push-in, gentle natural movement, "
              "soft studio lighting, the product stays sharp and unchanged, vertical short-video style.")
+
+# ---- Artis otomatis (tanpa Claude): foto artis + foto produk -> gambar gabungan -> klip 5 dtk -> loop 10 dtk ----
+# config.json: "artis_foto": "<URL foto artis publik>", "artis_nos": [9, 10], "artis_aksi": {"9": "minum dari tumbler"},
+#              "artis_teks": false (default: video tanpa tulisan). Perlu secret DASHSCOPE_API_KEY. Hasil disimpan
+#              di output/artis-<No>.png & .mp4 (tidak dibuat ulang -> hemat kredit).
+ARTIS_NOS = {str(x) for x in CFG.get("artis_nos", [])}
+ARTIS_FOTO = CFG.get("artis_foto", "")
+ARTIS_AKSI = {str(k): v for k, v in CFG.get("artis_aksi", {}).items()}
+ARTIS_AKSI_DEFAULT = ("gunakan produk itu secara alami: pakai bajunya, semprotkan parfumnya, makan makanannya, "
+                      "minum dari botolnya, atau pakai sabunnya")
+
+def artis_on(no): return str(no) in ARTIS_NOS and bool(ARTIS_FOTO) and bool(os.getenv("DASHSCOPE_API_KEY"))
+
+def _data_uri(path):
+    import base64
+    ext = "png" if str(path).lower().endswith(".png") else "jpeg"
+    return f"data:image/{ext};base64," + base64.b64encode(Path(path).read_bytes()).decode()
+
+def _dash_sync(url, body):
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={
+        "Authorization": "Bearer " + os.environ["DASHSCOPE_API_KEY"], "Content-Type": "application/json"})
+    try: return json.loads(urllib.request.urlopen(req, timeout=180).read())
+    except urllib.error.HTTPError as e: raise RuntimeError(f"AI {e.code}: {e.read().decode()[:200]}")
+
+def artis_gambar(no, foto_produk):
+    """Gambar gabungan: artis yang sama memegang/memakai produk (disimpan output/artis-<No>.png)."""
+    dst = OUT / f"artis-{no}.png"
+    if dst.exists(): return dst
+    aksi = ARTIS_AKSI.get(str(no), ARTIS_AKSI_DEFAULT)
+    prompt = ("Foto realistis gaya kamera HP, 9:16. Wanita yang sama persis dengan gambar pertama (wajah, rambut, identitas). "
+              "Dia tersenyum ceria ke kamera, " + aksi + ", memegang produk dari gambar kedua dengan jelas terlihat, "
+              "bentuk dan warna produk persis sama. Cahaya alami, pose natural dan menarik. Tanpa teks, logo, watermark.")
+    body = {"model": "qwen-image-edit-plus", "input": {"messages": [{"role": "user", "content": [
+        {"image": _data_uri(fetch(ARTIS_FOTO, ".jpg"))}, {"image": _data_uri(fetch(foto_produk, ".jpg"))},
+        {"text": prompt}]}]}, "parameters": {"n": 1, "watermark": False}}
+    r = _dash_sync("https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation", body)
+    url = r["output"]["choices"][0]["message"]["content"][0]["image"]
+    dst.write_bytes(urllib.request.urlopen(url, timeout=120).read())
+    return dst
+
+def artis_klip(no, foto_produk):
+    """Klip 5 dtk artis berinteraksi dengan produk, dari gambar gabungan (output/artis-<No>.mp4)."""
+    dst = OUT / f"artis-{no}.mp4"
+    if dst.exists(): return dst
+    img = artis_gambar(no, foto_produk)
+    aksi = ARTIS_AKSI.get(str(no), ARTIS_AKSI_DEFAULT)
+    prompt = ("Video HP natural dan realistis, wanita yang sama, gembira dan cantik. Dia tersenyum ke kamera, " + aksi +
+              ", gerakan halus seperti manusia asli (bukan robot), napas dan kedipan alami, lalu kembali ke pose awal "
+              "di detik terakhir. Wajah dan produk tetap sama. Tanpa teks.")
+    base = "https://dashscope-intl.aliyuncs.com/api/v1"
+    r = _dash(base + "/services/aigc/video-generation/video-synthesis", {
+        "model": "wan2.6-i2v-flash", "input": {"prompt": prompt, "img_url": _data_uri(img)},
+        "parameters": {"resolution": "720P", "duration": 5, "audio": False, "prompt_extend": False}})
+    tid = r["output"]["task_id"]
+    import time
+    for _ in range(60):
+        time.sleep(10)
+        o = _dash(f"{base}/tasks/{tid}")["output"]
+        if o["task_status"] == "SUCCEEDED":
+            dst.write_bytes(urllib.request.urlopen(o["video_url"], timeout=120).read()); return dst
+        if o["task_status"] in ("FAILED", "CANCELED", "UNKNOWN"):
+            raise RuntimeError("Klip artis gagal: " + str(o.get("message") or o.get("code"))[:150])
+    raise RuntimeError("Klip artis kelamaan")
 
 def ai_on(no): return str(no) in AI_NOS and bool(os.getenv("DASHSCOPE_API_KEY"))
 
@@ -283,15 +346,21 @@ def render(row):
             clips.append(c); left -= secs; k += 1
         except Exception as e:
             ai_gagal = str(e)[:100]; print("Klip AI gagal", no, "-", e)
-    for url in (g(row, "vid_ai"), g(row, "vid_saya")):
+    artis_v = None
+    if artis_on(no) and g(row, "img_produk"):
+        try: artis_v = artis_klip(no, g(row, "img_produk"))
+        except Exception as e:
+            ai_gagal = str(e)[:100]; print("Klip artis gagal", no, "-", e)
+    sumber_ai = str(artis_v) if artis_v else g(row, "vid_ai")
+    for url in (sumber_ai, g(row, "vid_saya")):
         v = fetch(url, ".mp4")
-        ulang = 2 if (url and url == g(row, "vid_ai") and str(no) in LOOP_NOS) else 1
+        ulang = 2 if (url and url == sumber_ai and (artis_v or str(no) in LOOP_NOS)) else 1
         if v and left > 0.3:
             secs = min(duration(v) or left, left)
             c = work / f"c{k}.mp4"; clip_from_video(v, secs, c)
             for n in range(ulang):
                 if left > 0.3:
-                    if n == 1 and str(no) in PINGPONG_NOS:
+                    if n == 1 and (artis_v or str(no) in PINGPONG_NOS):
                         r = work / f"c{k}_rev.mp4"
                         run(["ffmpeg", "-y", "-i", str(c), "-vf", "reverse", "-an", "-pix_fmt", "yuv420p",
                              "-c:v", "libx264", "-preset", "veryfast", str(r)])
@@ -325,7 +394,7 @@ def render(row):
     ass = work / "sub.ass"
     make_ass(ass, no, g(row, "naskah"), a_dur / tempo, total)
     vf += f",subtitles='{ass.resolve()}':fontsdir={Path(FONT).parent}"
-    if str(no) in TANPA_TEKS:
+    if str(no) in TANPA_TEKS or (artis_v and not CFG.get("artis_teks", False)):
         vf = "tpad=stop_mode=clone:stop_duration=5"
     af = (f"atempo={tempo:.3f}," if tempo > 1.0 else "") + f"apad,afade=t=out:st={max(0, total-0.4):.2f}:d=0.4"
     out = OUT / f"{no}.mp4"
