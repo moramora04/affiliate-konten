@@ -185,7 +185,7 @@ def make_ass(path, no, text, speech_dur, total):
         "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,"
         "Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
         "Style: Sub,DejaVu Sans,68,&H0000F0FF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,7,0,2,70,70,560,1",
-        "Style: Hook,DejaVu Sans,84,&H00FFFFFF,&H00FFFFFF,&H002D4DEE,&H00000000,-1,0,0,0,100,100,0,0,3,18,0,8,60,60,520,1",
+        "Style: Hook,DejaVu Sans,84,&H00FFFFFF,&H00FFFFFF,&H002D4DEE,&H00000000,-1,0,0,0,100,100,0,0,3,18,0,8,60,60,1000,1",
         "Style: End,DejaVu Sans,110,&H00FFFFFF,&H00FFFFFF,&H002D4DEE,&H00000000,-1,0,0,0,100,100,0,0,3,26,0,5,60,60,0,1",
         "", "[Events]", "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text"]
     lines.append(f"Dialogue: 0,{_t(0.05)},{_t(2.6)},Hook,,0,0,0,,{{\\fad(150,200)}}{hook}")
