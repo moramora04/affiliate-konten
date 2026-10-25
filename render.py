@@ -217,11 +217,12 @@ def esc(t):
 def input_hash(row):
     keys = ["nama", "harga", "naskah", "img_ai", "vid_ai", "audio", "img_produk", "pendek",
             "vid_saya", "foto_lain", "durasi"]
-    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID + MODEL_KEY() + EDIT_VER + (MUSIK_VER if MUSIK_ON else "") + ("ai" + str(AI_SECS) if ai_on(g(row, "no")) else "")).encode()).hexdigest()[:12]
+    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID + MODEL_KEY() + EDIT_VER + (MUSIK_VER if MUSIK_ON else "") + ("ai" + str(AI_SECS) if ai_on(g(row, "no")) else "") + ("loop" if g(row, "no") in LOOP_NOS else "")).encode()).hexdigest()[:12]
 
 # ---- Klip video AI (Alibaba Wan, bayar per detik; hanya untuk No yang ada di config.json "ai_klip") ----
 AI_NOS = {str(x) for x in CFG.get("ai_klip", [])}
 AI_SECS = int(CFG.get("ai_detik", 5))
+LOOP_NOS = {str(x) for x in CFG.get("loop_ai", [])}   # No di sini: Video AI diputar 2x (loop mulus)
 AI_PROMPT = ("Product showcase video for online shop. Smooth slow camera push-in, gentle natural movement, "
              "soft studio lighting, the product stays sharp and unchanged, vertical short-video style.")
 
@@ -282,10 +283,13 @@ def render(row):
             ai_gagal = str(e)[:100]; print("Klip AI gagal", no, "-", e)
     for url in (g(row, "vid_ai"), g(row, "vid_saya")):
         v = fetch(url, ".mp4")
+        ulang = 2 if (url and url == g(row, "vid_ai") and str(no) in LOOP_NOS) else 1
         if v and left > 0.3:
             secs = min(duration(v) or left, left)
             c = work / f"c{k}.mp4"; clip_from_video(v, secs, c)
-            clips.append(c); left -= secs; k += 1
+            for _ in range(ulang):
+                if left > 0.3:
+                    clips.append(c); left -= secs; k += 1
     urls = [g(row, "img_ai"), g(row, "img_produk")] + [x.strip() for x in g(row, "foto_lain").split(",")]
     fotos = [fetch(u, ".jpg") for u in urls if u]
     if not fotos and not clips: raise RuntimeError("Tidak ada video/foto sama sekali.")
