@@ -1,6 +1,7 @@
 """Buat produk.json (untuk halaman link-bio) langsung dari tab Affiliate.
 
-Kolom dibaca per posisi: A=No, C=Nama, F=Harga, L=Link affiliate, AB=Foto, AC=Nama pendek.
+Kolom dibaca per posisi: A=No, C=Nama, D=Status, F=Harga, G=Terjual, L=Link affiliate, M=Info,
+T=Video final, W=Caption FB, Z=Hashtag, AB=Foto, AC=Nama pendek, AO=Reel profil (tanda sudah diposting ulang).
 Produk hanya masuk kalau No berupa angka, link Shopee dan foto sudah terisi.
 """
 import csv, io, json, os, re, sys, urllib.request
@@ -18,7 +19,10 @@ for r in csv.reader(io.StringIO(data)):
         continue
     harga = re.sub(r"\D", "", c(5))
     produk.append({"kode": int(no), "nama": c(28) or c(2), "harga": int(harga or 0),
-                   "link": link, "foto": foto})
+                   "link": link, "foto": foto,
+                   # data untuk posting ulang Reel di profil (halaman reel.html)
+                   "status": c(3), "video": c(19), "info": c(12), "terjual": c(6),
+                   "capfb": c(22), "tag": c(25), "reel": c(40)})
 if not produk:
     sys.exit("Tidak ada produk valid di sheet; produk.json tidak diubah")
 produk.sort(key=lambda p: p["kode"])

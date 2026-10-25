@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Reel Ulang</title>
+<style>
+:root{--brand:#ee4d2d;--bg:#fff;--fg:#222;--mut:#777;--line:#e5e5e5}
+@media (prefers-color-scheme:dark){:root{--bg:#18191a;--fg:#e4e6eb;--mut:#a0a0a0;--line:#333}}
+body{margin:0;font:15px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--fg);padding:14px}
+h1{font-size:17px;margin:0 0 6px}
+#st{padding:10px;border-radius:8px;background:rgba(238,77,45,.1);margin:8px 0;white-space:pre-line}
+.it{display:flex;gap:10px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:8px;margin:6px 0;cursor:pointer}
+.it.on{border-color:var(--brand);box-shadow:0 0 0 2px rgba(238,77,45,.3)}
+.it img{width:44px;height:44px;border-radius:6px;object-fit:cover}
+.k{font-weight:800;color:var(--brand);width:28px}
+.n{flex:1;font-size:14px}.m{font-size:12px;color:var(--mut)}
+pre{white-space:pre-wrap;font:13px/1.4 system-ui;border:1px solid var(--line);border-radius:8px;padding:8px;max-height:180px;overflow:auto}
+button{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:10px 14px;font-weight:700;width:100%;margin-top:6px;cursor:pointer}
+button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<h1>Reel ulang ke profil FB</h1>
+<div id="st">Memuat daftar produk…</div>
+<div id="cap"></div>
+<div id="list"></div>
+<button class="sec" id="reset" style="display:none">Hapus tanda lokal (kalau ada yang salah tandai)</button>
+<script>
+// Webhook Make untuk menulis tanda di kolom AO sheet. Kosong = hanya ditandai di browser ini.
+const HOOK = "";
+const FB = "https://www.facebook.com";
+const LS = "reelDone";
+const $ = id => document.getElementById(id);
+const st = t => $("st").textContent = t;
+let done = []; try { done = JSON.parse(localStorage.getItem(LS) || "[]"); } catch (e) {}
+const saveDone = () => { try { localStorage.setItem(LS, JSON.stringify(done)); } catch (e) {} };
+const R = a => a[Math.floor(Math.random() * a.length)];
+const sh = a => a.map(v => [Math.random(), v]).sort((x, y) => x[0] - y[0]).map(v => v[1]);
+const rp = n => "Rp" + Number(n).toLocaleString("id-ID");
+
+function caption(p) {
+  const info = (p.info || "").replace(/\([^)]*\)/g, "").replace(/Ada program sampel gratis\.?/gi, "").replace(/\s+/g, " ").trim();
+  const laku = (p.terjual || "").toLowerCase();
+  const pembuka = [
+    `Yang lagi cari ${p.nama}, ini dia 👇`,
+    `Nemu barang bagus nih: ${p.nama} ✨`,
+    `Racun Shopee hari ini: ${p.nama} 🛒`,
+    `Cek dulu sebelum kehabisan: ${p.nama} 🔥`,
+    `Barang yang sering ditanyain: ${p.nama} 😍`,
+    `Info hemat buat kamu: ${p.nama} 💯`
+  ];
+  const harga = [
+    `Harganya cuma ${rp(p.harga)}${laku ? `, sudah ${laku} terjual` : ""}.`,
+    `Cuma ${rp(p.harga)} aja${laku ? ` dan sudah ${laku} orang beli` : ""}.`,
+    `${laku ? `Sudah ${laku} terjual, ` : ""}harga ${rp(p.harga)}-an.`
+  ];
+  const ajak = [`Order di sini 👉 ${p.link}`, `Link belanja 👉 ${p.link}`, `Cek harga terbaru 👉 ${p.link}`, `Langsung checkout 👉 ${p.link}`];
+  let tag = sh((p.tag || "").split(/\s+/).filter(t => t.startsWith("#")));
+  tag = tag.slice(0, Math.max(3, tag.length - 1));
+  tag.push(R(["#reels", "#reelsfb", "#belanjahemat", "#rekomendasi"]));
+  for (let i = 0; i < 20; i++) {
+    const c = [R(pembuka), info, "", R(harga), R(ajak), "(link affiliate)", "", [...new Set(tag)].join(" ")].join("\n").replace(/\n{3,}/g, "\n\n").trim();
+    if (c.trim() !== (p.capfb || "").trim()) return c;
+  }
+}
+
+let items = [], pilih = null, timer = null, terkirim = false;
+
+function gambar() {
+  $("list").innerHTML = items.map(p => `<div class="it${pilih && p.kode === pilih.kode ? " on" : ""}" data-k="${p.kode}">
+    <span class="k">${p.kode}</span><img src="https://images.weserv.nl/?w=100&url=${encodeURIComponent(p.foto)}" alt="">
+    <div class="n">${p.nama}<div class="m">${rp(p.harga)}</div></div></div>`).join("");
+  document.querySelectorAll(".it").forEach(el => el.onclick = () => {
+    if (terkirim) return;
+    clearTimeout(timer); pilih = items.find(p => p.kode == el.dataset.k); pilih.cap = caption(pilih);
+    gambar(); kirim();
+  });
+}
+
+async function kirim() {
+  if (!window.opener) { st("Halaman ini harus dibuka dari bookmark di Facebook."); return; }
+  terkirim = true;
+  $("cap").innerHTML = "<pre></pre>"; $("cap").firstChild.textContent = pilih.cap;
+  st(`Mengunduh video kode ${pilih.kode}…`);
+  try {
+    const r = await fetch(pilih.video, { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const blob = await r.blob();
+    window.opener.postMessage({ type: "reel", kode: pilih.kode, caption: pilih.cap, blob }, FB);
+    st(`Video kode ${pilih.kode} dikirim ke Facebook.\nCek di tab Facebook, lalu klik Posting sendiri.\nJangan tutup jendela ini sampai selesai (untuk menandai sheet).`);
+  } catch (e) { terkirim = false; st("Gagal mengunduh video: " + e.message); }
+}
+
+async function tandai(kode) {
+  if (!done.includes(kode)) { done.push(kode); saveDone(); }
+  let ket = "ditandai di browser ini";
+  if (HOOK) {
+    try { await fetch(HOOK + (HOOK.includes("?") ? "&" : "?") + "kode=" + kode, { mode: "no-cors" }); ket = "ditandai di sheet (kolom AO)"; }
+    catch (e) { ket += ", tapi gagal menandai sheet: " + e.message; }
+  }
+  st(`Kode ${kode} sudah diposting dan ${ket}.\nJendela ini tertutup otomatis.`);
+  setTimeout(() => window.close(), 2500);
+}
+
+window.addEventListener("message", e => {
+  if (e.origin !== FB) return;
+  if (e.data && e.data.type === "done") tandai(e.data.kode);
+});
+
+$("reset").onclick = () => { if (confirm("Hapus semua tanda lokal?")) { done = []; saveDone(); location.reload(); } };
+
+fetch("produk.json?v=" + Date.now()).then(r => r.json()).then(d => {
+  items = d.filter(p => /^Terposting/i.test(p.status || "") && /^https?:\/\//.test(p.video || "") && !(p.reel || "").trim() && !done.includes(p.kode))
+           .sort((a, b) => a.kode - b.kode);
+  $("reset").style.display = done.length ? "block" : "none";
+  if (!items.length) { st("Semua produk yang sudah terposting di Halaman sudah dibuat Reel ulang. 🎉"); return; }
+  pilih = items[0]; pilih.cap = caption(pilih); gambar();
+  let n = 3; st(`Kode ${pilih.kode} akan dikirim dalam ${n} detik… (klik produk lain untuk memilih)`);
+  timer = setInterval(() => { n--; if (n > 0) st(`Kode ${pilih.kode} akan dikirim dalam ${n} detik… (klik produk lain untuk memilih)`); else { clearInterval(timer); if (!terkirim) kirim(); } }, 1000);
+}).catch(e => st("Gagal memuat produk.json: " + e.message));
+</script>
+</body>
+</html>
