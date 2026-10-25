@@ -14,6 +14,7 @@ h1{margin:0 0 8px;font-size:20px}
 .cari{display:flex;gap:8px}
 .cari input{flex:1;font-size:18px;padding:10px 12px;border-radius:10px;border:0;min-width:0}
 .cari button{font-size:16px;padding:0 14px;border-radius:10px;border:0;background:#fff;color:var(--brand);font-weight:700}
+.cari input[type=search]{font-size:16px}
 .info{font-size:13px;opacity:.9;margin-top:6px}
 .sosial{max-width:640px;margin:0 auto;padding:14px 16px 0;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 .sosial a{background:var(--card);color:var(--brand);border:1px solid var(--line);font-weight:700;font-size:14px;padding:8px 14px;border-radius:999px;text-decoration:none}
@@ -31,11 +32,14 @@ footer{text-align:center;font-size:12px;color:var(--mut);padding:0 16px 24px}
 <body>
 <header>
   <h1>Cari kode dari video</h1>
+  <div class="cari" style="margin-bottom:8px">
+    <input id="nama" type="search" placeholder="Cari nama produk, mis. parfum" autocomplete="off" oninput="cari()">
+  </div>
   <form class="cari" onsubmit="cari();return false">
     <input id="q" inputmode="numeric" placeholder="Ketik kode, mis. 9" autocomplete="off">
     <button>Cari</button>
   </form>
-  <div class="info">Ketik nomor kode yang ada di video, lalu ketuk produknya untuk membuka Shopee.</div>
+  <div class="info">Cari nama produk atau ketik nomor kode di video, lalu ketuk produknya untuk membuka Shopee.</div>
 </header>
 <nav class="sosial">
   <a href="https://www.tiktok.com/@tradeyourlive" target="_blank" rel="noopener">TikTok</a>
@@ -50,20 +54,22 @@ const rp=n=>"Rp"+Number(n).toLocaleString("id-ID");
 const img=u=>"https://images.weserv.nl/?w=200&h=200&fit=cover&url="+encodeURIComponent(u);
 function tampil(list,sorot){
   const d=document.getElementById("daftar");
-  if(!list.length){d.innerHTML='<div class="kosong">Kode tidak ditemukan.</div>';return}
+  if(!list.length){d.innerHTML='<div class="kosong">Produk tidak ditemukan.</div>';return}
   d.innerHTML=list.map(p=>`<a class="kartu${p.kode==sorot?' sorot':''}" id="kode-${p.kode}" href="${p.link}" rel="nofollow sponsored">
     <div class="kode">${p.kode}</div><img class="foto" loading="lazy" src="${img(p.foto)}" alt="">
     <div class="teks"><div class="nama">${p.nama}</div><div class="harga">${rp(p.harga)}</div><div class="beli">Ketuk untuk beli di Shopee ›</div></div></a>`).join("");
 }
 function cari(){
   const q=document.getElementById("q").value.trim();
-  if(!q){tampil(semua);return}
+  const kata=document.getElementById("nama").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  let hasil=semua;
+  if(kata.length)hasil=hasil.filter(p=>kata.every(k=>p.nama.toLowerCase().includes(k)));
   const n=parseInt(q,10);
-  const hasil=isNaN(n)?semua.filter(p=>p.nama.toLowerCase().includes(q.toLowerCase())):semua.filter(p=>p.kode===n);
-  tampil(hasil,n); history.replaceState(null,"","#"+q);
+  if(q)hasil=isNaN(n)?hasil.filter(p=>p.nama.toLowerCase().includes(q.toLowerCase())):hasil.filter(p=>p.kode===n);
+  tampil(hasil,n); history.replaceState(null,"",q?"#"+q:location.pathname);
 }
 fetch("produk.json?v="+Date.now()).then(r=>r.json()).then(d=>{
-  semua=d.sort((a,b)=>b.kode-a.kode);
+  semua=d.sort((a,b)=>a.kode-b.kode);
   const h=decodeURIComponent(location.hash.slice(1));
   if(h){document.getElementById("q").value=h;cari()}else tampil(semua);
 }).catch(()=>{document.getElementById("daftar").innerHTML='<div class="kosong">Gagal memuat daftar. Coba muat ulang.</div>'});
