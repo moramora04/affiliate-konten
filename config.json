@@ -1,9 +1,1 @@
-{
-  "tts_model": "eleven_v4",
-  "musik": true,
-  "ai_klip": [],
-  "ai_detik": 5,
-  "loop_ai": [2, 13],
-  "pingpong": [13],
-  "tanpa_teks": [13]
-}
+{"tts_model":"eleven_v4","musik":true,"ai_klip":[],"ai_detik":5,"loop_ai":[2,9,13],"pingpong":[9,13],"tanpa_teks":[9,13]}
