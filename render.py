@@ -217,12 +217,14 @@ def esc(t):
 def input_hash(row):
     keys = ["nama", "harga", "naskah", "img_ai", "vid_ai", "audio", "img_produk", "pendek",
             "vid_saya", "foto_lain", "durasi"]
-    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID + MODEL_KEY() + EDIT_VER + (MUSIK_VER if MUSIK_ON else "") + ("ai" + str(AI_SECS) if ai_on(g(row, "no")) else "") + ("loop" if g(row, "no") in LOOP_NOS else "")).encode()).hexdigest()[:12]
+    return hashlib.md5(("|".join(g(row, k) for k in keys) + VOICE_ID + MODEL_KEY() + EDIT_VER + (MUSIK_VER if MUSIK_ON else "") + ("ai" + str(AI_SECS) if ai_on(g(row, "no")) else "") + ("loop" if g(row, "no") in LOOP_NOS else "") + ("pp" if g(row, "no") in PINGPONG_NOS else "") + ("nt" if g(row, "no") in TANPA_TEKS else "")).encode()).hexdigest()[:12]
 
 # ---- Klip video AI (Alibaba Wan, bayar per detik; hanya untuk No yang ada di config.json "ai_klip") ----
 AI_NOS = {str(x) for x in CFG.get("ai_klip", [])}
 AI_SECS = int(CFG.get("ai_detik", 5))
 LOOP_NOS = {str(x) for x in CFG.get("loop_ai", [])}   # No di sini: Video AI diputar 2x (loop mulus)
+PINGPONG_NOS = {str(x) for x in CFG.get("pingpong", [])}   # putaran ke-2 dibalik (maju-mundur)
+TANPA_TEKS = {str(x) for x in CFG.get("tanpa_teks", [])}   # tanpa tulisan/subtitle di video
 AI_PROMPT = ("Product showcase video for online shop. Smooth slow camera push-in, gentle natural movement, "
              "soft studio lighting, the product stays sharp and unchanged, vertical short-video style.")
 
@@ -287,9 +289,16 @@ def render(row):
         if v and left > 0.3:
             secs = min(duration(v) or left, left)
             c = work / f"c{k}.mp4"; clip_from_video(v, secs, c)
-            for _ in range(ulang):
+            for n in range(ulang):
                 if left > 0.3:
-                    clips.append(c); left -= secs; k += 1
+                    if n == 1 and str(no) in PINGPONG_NOS:
+                        r = work / f"c{k}_rev.mp4"
+                        run(["ffmpeg", "-y", "-i", str(c), "-vf", "reverse", "-an", "-pix_fmt", "yuv420p",
+                             "-c:v", "libx264", "-preset", "veryfast", str(r)])
+                        clips.append(r)
+                    else:
+                        clips.append(c)
+                    left -= secs; k += 1
     urls = [g(row, "img_ai"), g(row, "img_produk")] + [x.strip() for x in g(row, "foto_lain").split(",")]
     fotos = [fetch(u, ".jpg") for u in urls if u]
     if not fotos and not clips: raise RuntimeError("Tidak ada video/foto sama sekali.")
@@ -316,6 +325,8 @@ def render(row):
     ass = work / "sub.ass"
     make_ass(ass, no, g(row, "naskah"), a_dur / tempo, total)
     vf += f",subtitles='{ass.resolve()}':fontsdir={Path(FONT).parent}"
+    if str(no) in TANPA_TEKS:
+        vf = "tpad=stop_mode=clone:stop_duration=5"
     af = (f"atempo={tempo:.3f}," if tempo > 1.0 else "") + f"apad,afade=t=out:st={max(0, total-0.4):.2f}:d=0.4"
     out = OUT / f"{no}.mp4"
     if MUSIK_ON:

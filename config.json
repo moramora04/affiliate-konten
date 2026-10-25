@@ -3,5 +3,7 @@
   "musik": true,
   "ai_klip": [3],
   "ai_detik": 5,
-  "loop_ai": [2]
+  "loop_ai": [2, 13],
+  "pingpong": [13],
+  "tanpa_teks": [13]
 }
