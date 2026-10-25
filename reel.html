@@ -90,6 +90,8 @@ async function kirim() {
     const blob = await r.blob();
     window.opener.postMessage({ type: "reel", kode: pilih.kode, caption: pilih.cap, blob }, FB);
     st(`Video kode ${pilih.kode} dikirim ke Facebook.\nCek di tab Facebook, lalu klik Posting sendiri.\nJangan tutup jendela ini sampai selesai (untuk menandai sheet).`);
+    $("cap").insertAdjacentHTML("beforeend", '<button id="tdn">Sudah saya posting (tandai di sheet)</button>');
+    $("tdn").onclick = () => tandai(pilih.kode);
   } catch (e) { terkirim = false; st("Gagal mengunduh video: " + e.message); }
 }
 
