@@ -230,7 +230,8 @@ AI_PROMPT = ("Product showcase video for online shop. Smooth slow camera push-in
 
 # ---- Artis otomatis (tanpa Claude): foto artis + foto produk -> gambar gabungan -> klip 5 dtk -> loop 10 dtk ----
 # config.json: "artis_foto": "<URL foto artis publik>", "artis_nos": [9, 10], "artis_aksi": {"9": "minum dari tumbler"},
-#              "artis_teks": false (default: video tanpa tulisan). Perlu secret DASHSCOPE_API_KEY. Hasil disimpan
+#              "artis_teks": false (default: video tanpa tulisan), "artis_gambar": {"12": "<URL gambar gabungan siap>"}
+#              (kalau diisi, pembuatan gambar dilewati). Perlu secret DASHSCOPE_API_KEY. Hasil disimpan
 #              di output/artis-<No>.png & .mp4 (tidak dibuat ulang -> hemat kredit).
 ARTIS_NOS = {str(x) for x in CFG.get("artis_nos", [])}
 ARTIS_FOTO = CFG.get("artis_foto", "")
@@ -255,14 +256,24 @@ def artis_gambar(no, foto_produk):
     """Gambar gabungan: artis yang sama memegang/memakai produk (disimpan output/artis-<No>.png)."""
     dst = OUT / f"artis-{no}.png"
     if dst.exists(): return dst
+    siap = CFG.get("artis_gambar", {}).get(str(no))   # gambar gabungan buatan sendiri (URL) -> lewati pembuatan gambar
+    if siap:
+        dst.write_bytes(fetch(siap, ".png").read_bytes()); return dst
     aksi = ARTIS_AKSI.get(str(no), ARTIS_AKSI_DEFAULT)
     prompt = ("Foto realistis gaya kamera HP, 9:16. Wanita yang sama persis dengan gambar pertama (wajah, rambut, identitas). "
               "Dia tersenyum ceria ke kamera, " + aksi + ", memegang produk dari gambar kedua dengan jelas terlihat, "
               "bentuk dan warna produk persis sama. Cahaya alami, pose natural dan menarik. Tanpa teks, logo, watermark.")
-    body = {"model": "qwen-image-edit-plus", "input": {"messages": [{"role": "user", "content": [
-        {"image": _data_uri(fetch(ARTIS_FOTO, ".jpg"))}, {"image": _data_uri(fetch(foto_produk, ".jpg"))},
-        {"text": prompt}]}]}, "parameters": {"n": 1, "watermark": False}}
-    r = _dash_sync("https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation", body)
+    r, err = None, ""
+    for model in CFG.get("artis_model_gambar", ["qwen-image-edit-plus", "qwen-image-edit"]):
+        body = {"model": model, "input": {"messages": [{"role": "user", "content": [
+            {"image": _data_uri(fetch(ARTIS_FOTO, ".jpg"))}, {"image": _data_uri(fetch(foto_produk, ".jpg"))},
+            {"text": prompt}]}]}, "parameters": {"n": 1, "watermark": False}}
+        try:
+            r = _dash_sync("https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation", body); break
+        except RuntimeError as e:
+            err = str(e)
+            if "Model not exist" not in err: raise
+    if r is None: raise RuntimeError(err)
     url = r["output"]["choices"][0]["message"]["content"][0]["image"]
     dst.write_bytes(urllib.request.urlopen(url, timeout=120).read())
     return dst
