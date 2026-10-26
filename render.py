@@ -488,4 +488,8 @@ def main():
     if gagal: print(f"{gagal} baris gagal dirender.")
 
 if __name__ == "__main__":
+    try:
+        import render_facts; render_facts.main()   # video fakta (Daily Fact Bites & Pawsome)
+    except Exception as e:
+        print("Render fakta gagal:", e)
     main()
