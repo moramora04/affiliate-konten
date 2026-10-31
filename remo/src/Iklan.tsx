@@ -1,11 +1,12 @@
 import React from 'react';
-import {AbsoluteFill, Audio, Img, Sequence, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
+import {AbsoluteFill, Audio, Img, Sequence, interpolate, spring, staticFile, useCurrentFrame, useVideoConfig, Easing} from 'remotion';
 
 export type Kata = {w: string; mulai: number; durasi: number}; // detik
 export type Props = {
   kode: string; judul: string; harga: string; durasi: number;
   artis: string; fotos: string[]; audio: string; musik: string;
   artisDetik: number; fotoDetik: number; kata: Kata[];
+  terjual?: string; // mis. "378RB+"
   artisPotong?: string; // PNG artis tanpa latar (kecil, goyang di atas foto produk)
 };
 const src = (s: string) => (s.startsWith('http') ? s : staticFile(s));
@@ -48,7 +49,7 @@ const Judul: React.FC<{judul: string; harga: string}> = ({judul, harga}) => {
   );
 };
 
-// Subtitle karaoke di bagian bawah (tidak menutupi produk): 4 kata per layar, kata yang diucapkan menyala kuning
+// Subtitle karaoke: 4 kata per layar, kata yang sedang diucapkan menyala kuning & membesar
 const Subtitle: React.FC<{kata: Kata[]}> = ({kata}) => {
   const f = useCurrentFrame(); const {fps} = useVideoConfig();
   const t = f / fps;
@@ -78,24 +79,35 @@ const Ajakan: React.FC<{kode: string}> = ({kode}) => {
   return (
     <div style={{position: 'absolute', bottom: 170, left: 0, right: 0, textAlign: 'center', transform: `scale(${m}) rotate(${goyang}deg)`}}>
       <div style={{display: 'inline-block', background: '#EE4D2D', color: '#fff', fontFamily: 'sans-serif', fontWeight: 900, fontSize: 54, padding: '20px 40px', borderRadius: 26, boxShadow: '0 10px 0 #9c2d16'}}>
-        KODE {kode} • CEK LINK DI BIO
+        KODE {kode} • CEK LINK DI BIO 👆
       </div>
     </div>
   );
 };
 
-// Artis kecil tanpa latar: masuk membal, lalu goyang-goyang lucu di sisi kanan
+// Badge jumlah terjual
+const Terjual: React.FC<{t: string}> = ({t}) => {
+  const f = useCurrentFrame(); const {fps} = useVideoConfig();
+  const m = spring({frame: f - 22, fps, config: {damping: 9, stiffness: 140}});
+  return (
+    <div style={{position: 'absolute', top: 430, left: 0, right: 0, textAlign: 'center', transform: `scale(${m * (1 + 0.025 * Math.sin(f / 6))})`}}>
+      <span style={{background: '#EE4D2D', color: '#fff', fontSize: 52, fontWeight: 900, padding: '10px 32px', borderRadius: 40, fontFamily: 'sans-serif', boxShadow: '0 6px 0 #9c2d16'}}>🔥 {t} TERJUAL</span>
+    </div>
+  );
+};
+
+// Artis kecil di sudut kanan bawah: SATU komponen untuk ketiga foto produk,
+// jadi goyangannya mulus dan tidak putus saat foto berganti.
 const ArtisKecil: React.FC<{u: string}> = ({u}) => {
   const f = useCurrentFrame(); const {fps} = useVideoConfig();
-  const masuk = spring({frame: f, fps, config: {damping: 7, stiffness: 150}});
-  const goyang = Math.sin(f / 3.2) * 7;                 // miring kiri-kanan
-  const loncat = Math.abs(Math.sin(f / 5)) * -26;       // melonjak kecil
-  const napas = 1 + 0.03 * Math.sin(f / 4);
+  const masuk = spring({frame: f, fps, config: {damping: 12, stiffness: 90}});
+  const goyang = Math.sin(f / 9) * 3.5;
+  const naik = Math.sin(f / 9 + 1.2) * -12;
   return (
-    <div style={{position: 'absolute', right: 24, bottom: 520, width: 340, height: 540, transformOrigin: '50% 100%',
-      transform: `translateY(${(1 - masuk) * 500 + loncat}px) rotate(${goyang}deg) scale(${masuk * napas})`}}>
-      <Img src={src(u)} style={{width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'bottom',
-        filter: 'drop-shadow(0 12px 14px rgba(0,0,0,.45))'}} />
+    <div style={{position: 'absolute', right: 8, bottom: 0, width: 470, height: 720, transformOrigin: '50% 100%',
+      transform: `translateY(${(1 - masuk) * 300 + naik}px) rotate(${goyang}deg) scale(${0.85 + 0.15 * masuk})`}}>
+      <Img src={src(u)} style={{width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'bottom right',
+        filter: 'drop-shadow(0 10px 14px rgba(0,0,0,.45))'}} />
     </div>
   );
 };
@@ -106,23 +118,28 @@ export const Iklan: React.FC<Props> = (p) => {
   // Susunan: foto artis (artisDetik) -> maks 3 foto asli (fotoDetik tiap foto, artis kecil goyang di atasnya)
   // -> sisa waktu foto artis lagi.
   const bagian: {u: string; dur: number; i: number; kecil: boolean}[] = [];
+  let kecilMulai = -1, kecilDur = 0;
   let sisa = akhir, i = 0;
   const tambah = (u: string, detik: number, kecil: boolean) => {
     const d = Math.min(sisa, Math.round(detik * fps));
-    if (d > 0 && u) { bagian.push({u, dur: d, i: i++, kecil}); sisa -= d; }
+    if (d > 0 && u) {
+      if (kecil) { if (kecilMulai < 0) kecilMulai = akhir - sisa; kecilDur += d; }
+      bagian.push({u, dur: d, i: i++, kecil}); sisa -= d;
+    }
   };
   tambah(p.artis, p.artisDetik, false);
   p.fotos.slice(0, 3).forEach((u) => tambah(u, p.fotoDetik, !!p.artisPotong));
-  if (sisa > 0) tambah(p.artis || p.fotos[0], sisa / fps, false);
+  if (sisa > 0) tambah(p.artis, sisa / fps, false);
   let mulai = 0;
   return (
     <AbsoluteFill style={{backgroundColor: '#000'}}>
       {bagian.map((s, n) => { const fr = mulai; mulai += s.dur; return (
         <Sequence key={n} from={fr} durationInFrames={s.dur}>
           <Foto u={s.u} dur={s.dur} i={s.i} />
-          {s.kecil && p.artisPotong ? <ArtisKecil u={p.artisPotong} /> : null}
         </Sequence>); })}
+      {p.artisPotong && kecilDur > 0 ? <Sequence from={kecilMulai} durationInFrames={kecilDur}><ArtisKecil u={p.artisPotong} /></Sequence> : null}
       <Judul judul={p.judul} harga={p.harga} />
+      {p.terjual ? <Terjual t={p.terjual} /> : null}
       <Subtitle kata={p.kata} />
       <Sequence from={Math.max(0, akhir - 3 * fps)}><Ajakan kode={p.kode} /></Sequence>
       {p.audio ? <Audio src={src(p.audio)} /> : null}
