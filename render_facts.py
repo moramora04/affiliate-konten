@@ -8,6 +8,11 @@ Video yang sudah ada tidak dirender ulang. Hasil dicatat di output/facts_hasil.j
 import json, os, subprocess, textwrap, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 
+try:
+    import render_remo  # versi Remotion untuk video produk (aktif lewat config.json "remotion_dari")
+except Exception as _e:
+    print("render_remo tidak aktif:", _e)
+
 ROOT = Path(__file__).parent
 OUT = ROOT / "output"
 WORK = ROOT / ".cache" / "facts"
