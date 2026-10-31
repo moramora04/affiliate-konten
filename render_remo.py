@@ -12,7 +12,7 @@ from pathlib import Path
 M = sys.modules["__main__"]          # render.py yang sedang berjalan
 ROOT = Path(__file__).parent
 REMO = ROOT / "remo"
-REMO_VER = "r1"
+REMO_VER = "r2"
 _asli_render, _asli_hash = M.render, M.input_hash
 
 
@@ -150,6 +150,9 @@ def remo_render(row):
             "artisDetik": float(M.CFG.get("foto_artis_detik", 5)), "fotoDetik": float(M.CFG.get("foto_asli_detik", 2)),
             "kata": kata_waktu(g(row, "naskah"), a_dur / tempo, total),
         }
+        tj = re.search(r"\d[\d.,]*\s*(?:RB|rb|JT|jt|K|k)?\+?", row.get("Terjual") or "")
+        if tj:
+            props["terjual"] = tj.group(0).strip().upper()
         if potong:
             props["artisPotong"] = potong
         pj = M.CACHE / f"remo-props-{no}.json"
