@@ -330,3 +330,169 @@ def ai_clip(no, foto_url):
         o = _dash(f"{base}/tasks/{tid}")["output"]
         if o["task_status"] == "SUCCEEDED":
             dst.write_bytes(urllib.request.urlopen(o["video_url"], timeout=120).read()); return dst
+        if o["task_status"] in ("FAILED", "CANCELED", "UNKNOWN"):
+            raise RuntimeError("Klip AI gagal: " + str(o.get("message") or o.get("code"))[:150])
+    raise RuntimeError("Klip AI kelamaan")
+
+def render(row):
+    no = g(row, "no")
+    nama = g(row, "nama")
+    harga = re.sub(r"\D", "", g(row, "harga"))
+    work = CACHE / f"row{no}"; work.mkdir(exist_ok=True)
+
+    audio = fetch(g(row, "audio"), ".mp3") or voice_for(row)
+    a_dur = duration(audio)
+    try: total = float(g(row, "durasi").replace(",", "."))
+    except ValueError: total = 0
+    if total <= 0: total = a_dur + 0.6
+    total = max(5.0, min(total, 90.0))
+    # Suara lebih panjang dari durasi: percepat sedikit (maks 1,25x), sisanya dipotong.
+    tempo = min(1.25, a_dur / (total - 0.3)) if a_dur > total - 0.3 else 1.0
+
+    clips, left, k = [], total, 0
+    ai_gagal = ""
+    if ai_on(no) and g(row, "img_produk"):
+        try:
+            v = ai_clip(no, g(row, "img_produk"))
+            secs = min(duration(v) or left, left)
+            c = work / "c_ai.mp4"; clip_from_video(v, secs, c)
+            clips.append(c); left -= secs; k += 1
+        except Exception as e:
+            ai_gagal = str(e)[:100]; print("Klip AI gagal", no, "-", e)
+    artis_v = None
+    if artis_on(no) and g(row, "img_produk"):
+        try: artis_v = artis_klip(no, g(row, "img_produk"))
+        except Exception as e:
+            ai_gagal = str(e)[:100]; print("Klip artis gagal", no, "-", e)
+    sumber_ai = str(artis_v) if artis_v else g(row, "vid_ai")
+    for url in (sumber_ai, g(row, "vid_saya")):
+        v = fetch(url, ".mp4")
+        ulang = 2 if (url and url == sumber_ai and (artis_v or str(no) in LOOP_NOS)) else 1
+        if v and left > 0.3:
+            secs = min(duration(v) or left, left)
+            c = work / f"c{k}.mp4"; clip_from_video(v, secs, c)
+            for n in range(ulang):
+                if left > 0.3:
+                    if n == 1 and (artis_v or str(no) in PINGPONG_NOS):
+                        r = work / f"c{k}_rev.mp4"
+                        run(["ffmpeg", "-y", "-i", str(c), "-vf", "reverse", "-an", "-pix_fmt", "yuv420p",
+                             "-c:v", "libx264", "-preset", "veryfast", str(r)])
+                        clips.append(r)
+                    else:
+                        clips.append(c)
+                    left -= secs; k += 1
+    urls = [g(row, "img_ai"), g(row, "img_produk")] + [x.strip() for x in g(row, "foto_lain").split(",")]
+    fotos = [fetch(u, ".jpg") for u in urls if u]
+    artis_foto = fotos[0] if (g(row, "img_ai") and fotos) else None   # foto artis = kolom Gambar AI
+    if not fotos and not clips: raise RuntimeError("Tidak ada video/foto sama sekali.")
+    i = 0
+    while left > 0.3 and fotos:
+        secs = min(ARTIS_DETIK if (artis_foto and fotos[i % len(fotos)] == artis_foto) else FOTO_DETIK, left)
+        c = work / f"c{k}.mp4"; clip_from_image(fotos[i % len(fotos)], secs, c, variant=i)
+        clips.append(c); left -= secs; k += 1; i += 1
+
+    lst = work / "list.txt"
+    lst.write_text("".join(f"file '{c.resolve()}'\n" for c in clips))
+    joined = work / "joined.mp4"
+    run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(joined)])
+
+    pendek = g(row, "pendek") or nama
+    judul = esc(pendek[:30] + ("…" if len(pendek) > 30 else ""))
+    hrg = esc(f"Cuma Rp{int(harga):,}".replace(",", ".")) if harga else ""
+    box = "box=1:boxcolor=black@0.55:boxborderw=24"
+    vf = (f"tpad=stop_mode=clone:stop_duration=5,"
+          f"drawtext=fontfile={FONT}:text='{judul}':fontsize=46:fontcolor=white:{box}:x=(w-tw)/2:y=170,"
+          + (f"drawtext=fontfile={FONT}:text='{hrg}':fontsize=72:fontcolor=yellow:{box}:x=(w-tw)/2:y=290," if hrg else "")
+          + f"drawtext=fontfile={FONT}:text='Kode {no} - Cek link di bio':fontsize=56:fontcolor=white:"
+            f"box=1:boxcolor=0xEE4D2D@0.95:boxborderw=26:x=(w-tw)/2:y=h-330")
+    ass = work / "sub.ass"
+    make_ass(ass, no, g(row, "naskah"), a_dur / tempo, total)
+    vf += f",subtitles='{ass.resolve()}':fontsdir={Path(FONT).parent}"
+    if str(no) in TANPA_TEKS or (artis_v and not CFG.get("artis_teks", False)):
+        vf = "tpad=stop_mode=clone:stop_duration=5"
+    af = (f"atempo={tempo:.3f}," if tempo > 1.0 else "") + f"apad,afade=t=out:st={max(0, total-0.4):.2f}:d=0.4"
+    out = OUT / f"{no}.mp4"
+    if MUSIK_ON:
+        mus = make_music()
+        fc = (f"[1:a]{af}[v];[2:a]volume=0.13,afade=t=in:d=1,afade=t=out:st={max(0, total-1.2):.2f}:d=1.2[m];"
+              f"[v][m]amix=inputs=2:duration=first:normalize=0[a]")
+        run(["ffmpeg", "-y", "-i", str(joined), "-i", str(audio), "-stream_loop", "-1", "-i", str(mus),
+             "-filter_complex", fc, "-vf", vf, "-map", "0:v", "-map", "[a]",
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+             "-c:a", "aac", "-b:a", "128k", "-t", f"{total:.2f}", "-movflags", "+faststart", str(out)])
+    else:
+        run(["ffmpeg", "-y", "-i", str(joined), "-i", str(audio), "-vf", vf, "-af", af,
+             "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+             "-c:a", "aac", "-b:a", "128k", "-t", f"{total:.2f}", "-movflags", "+faststart", str(out)])
+    catatan = f"Selesai {duration(out):.0f} dtk"
+    if tempo > 1.0: catatan += f" (suara dipercepat {tempo:.2f}x)"
+    if a_dur / 1.25 > total: catatan += " - suara terpotong, pendekkan naskah"
+    if ai_on(no) and not ai_gagal: catatan += " + klip AI"
+    if ai_gagal: catatan += " (klip AI gagal: " + ai_gagal + ")"
+    return catatan
+
+HASIL_DATA = {}
+
+def voice_for(row):
+    """Suara ElevenLabs per baris -> output/suara-<No>.mp4 (bisa didengar & tidak dibuat ulang)."""
+    no, text = g(row, "no"), g(row, "naskah")
+    if not text: raise RuntimeError("Naskah suara (kolom L) kosong.")
+    h = hashlib.md5((VOICE_ID + MODEL_KEY() + text).encode()).hexdigest()[:12]
+    out = OUT / f"suara-{no}.mp4"
+    rec = HASIL_DATA.setdefault(no, {"No": no})
+    if rec.get("SuaraHash") == h and out.exists():
+        return out
+    run(["ffmpeg", "-y", "-i", str(tts(text)), "-vn", "-c:a", "aac", "-b:a", "128k", str(out)])
+    rec["SuaraHash"] = h
+    rec["Suara"] = f"{duration(out):.0f}"
+    return out
+
+def load_hasil():
+    if not HASIL.exists(): return {}
+    return {r["No"]: r for r in csv.DictReader(HASIL.open(encoding="utf-8"))}
+
+def save_hasil(data):
+    with HASIL.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["No", "Hasil", "Hash", "Suara", "SuaraHash"], extrasaction="ignore")
+        w.writeheader()
+        for k in sorted(data, key=lambda x: int(x) if x.isdigit() else 0):
+            w.writerow(data[k])
+
+def main():
+    src = os.getenv("SHEET_CSV_URL") or (sys.argv[1] if len(sys.argv) > 1 else "")
+    if not src: sys.exit("Isi secret SHEET_CSV_URL (link CSV tab Affiliate) atau beri path CSV.")
+    data = Path(src).read_text() if os.path.exists(src) else urllib.request.urlopen(src, timeout=60).read().decode()
+    # Judul kolom bisa dobel (mis. "No" dari data hasil yang tersembunyi) -> pakai kemunculan PERTAMA.
+    rd = csv.reader(io.StringIO(data)); header = next(rd, [])
+    idx = {}
+    for i, h in enumerate(header): idx.setdefault(h.strip(), i)
+    semua = [{h: (r[i] if i < len(r) else "") for h, i in idx.items()} for r in rd]
+    semua = [r for r in semua if g(r, "no")]
+    hasil = HASIL_DATA; hasil.update(load_hasil())
+    # 1) Suara: dibuat untuk semua baris yang punya naskah & kolom voice kosong (sekali saja per naskah).
+    for r in semua:
+        if g(r, "naskah") and not g(r, "audio"):
+            try: voice_for(r)
+            except Exception as e: print("Suara gagal baris", g(r, "no"), "-", e)
+    # 2) Video: semua baris KECUALI yang berisi "Tunggu", dan hanya kalau bahannya berubah.
+    rows = [r for r in semua if g(r, "render").lower() != "tunggu"]
+    todo = [r for r in rows if hasil.get(g(r, "no"), {}).get("Hash") != input_hash(r)]
+    wib = timezone(timedelta(hours=7)); gagal = 0
+    for r in todo:
+        no = g(r, "no"); rec = hasil.setdefault(no, {"No": no})
+        try:
+            cat = render(r); print("OK  ", no, cat)
+            rec.update({"Hasil": f"{cat} - {datetime.now(wib):%d/%m %H:%M}", "Hash": "" if "klip AI gagal" in cat else input_hash(r)})
+        except Exception as e:
+            gagal += 1; print("GAGAL baris", no, "-", e)
+            rec.update({"Hasil": f"Gagal: {str(e)[:120]}", "Hash": ""})
+    if not todo: print("Tidak ada baris baru yang dicentang Render.")
+    save_hasil(hasil)
+    if gagal: print(f"{gagal} baris gagal dirender.")
+
+if __name__ == "__main__":
+    try:
+        import render_facts; render_facts.main()   # video fakta (Daily Fact Bites & Pawsome)
+    except Exception as e:
+        print("Render fakta gagal:", e)
+    main()
