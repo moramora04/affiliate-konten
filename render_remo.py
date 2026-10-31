@@ -185,7 +185,10 @@ def input_hash(row):
     h = _asli_hash(row)
     if not aktif(M.g(row, "no")):
         return h
-    return hashlib.md5((h + REMO_VER + str(M.CFG.get("foto_artis_detik", 5))).encode()).hexdigest()[:12]
+    # kolom Render berisi "Ulang ..." (mis. "Ulang 1", "Ulang 2") = paksa render ulang sekali, walau bahan tidak berubah
+    u = (row.get(M.COL["render"]) or "").strip().lower()
+    paksa = u if u.startswith("ulang") else ""
+    return hashlib.md5((h + REMO_VER + str(M.CFG.get("foto_artis_detik", 5)) + paksa).encode()).hexdigest()[:12]
 
 
 M.render = render
