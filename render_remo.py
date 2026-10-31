@@ -12,7 +12,7 @@ from pathlib import Path
 M = sys.modules["__main__"]          # render.py yang sedang berjalan
 ROOT = Path(__file__).parent
 REMO = ROOT / "remo"
-REMO_VER = "r2"
+REMO_VER = "r3"
 _asli_render, _asli_hash = M.render, M.input_hash
 
 
@@ -139,6 +139,12 @@ def remo_render(row):
             nama = f"f{len(fotos) + 1}.jpg"
             shutil.copy(p, pub / nama)
             fotos.append(f"p{no}/{nama}")
+        # bagian foto produk selalu ~6 detik: 1 foto dipakai 2x (3 dtk, gerak kamera berbeda), 2 foto @3 dtk, 3 foto @2 dtk
+        foto_detik = float(M.CFG.get("foto_asli_detik", 2))
+        if fotos:
+            if len(fotos) == 1:
+                fotos = fotos * 2
+            foto_detik = 3 * float(M.CFG.get("foto_asli_detik", 2)) / len(fotos)
         pendek = g(row, "pendek") or g(row, "nama")
         harga = re.sub(r"\D", "", g(row, "harga"))
         props = {
@@ -147,7 +153,7 @@ def remo_render(row):
             "harga": ("Rp" + f"{int(harga):,}".replace(",", ".")) if harga else "",
             "durasi": total, "artis": artis, "fotos": fotos,
             "audio": f"p{no}/suara.mp3", "musik": musik,
-            "artisDetik": float(M.CFG.get("foto_artis_detik", 5)), "fotoDetik": float(M.CFG.get("foto_asli_detik", 2)),
+            "artisDetik": float(M.CFG.get("foto_artis_detik", 5)), "fotoDetik": foto_detik,
             "kata": kata_waktu(g(row, "naskah"), a_dur / tempo, total),
         }
         tj = re.search(r"\d[\d.,]*\s*(?:RB|rb|JT|jt|K|k)?\+?", row.get("Terjual") or "")
