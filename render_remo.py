@@ -43,6 +43,12 @@ def siapkan_alat():
             sh([sys.executable, "-m", "pip", "install", "-q", "rembg", "onnxruntime", "pillow"])
         except RuntimeError:
             sh([sys.executable, "-m", "pip", "install", "-q", "--break-system-packages", "rembg", "onnxruntime", "pillow"])
+        import importlib, site
+        importlib.invalidate_caches()
+        for d in (site.getusersitepackages(),):
+            if os.path.isdir(d) and d not in sys.path:
+                sys.path.append(d)
+        import rembg, PIL  # noqa  (gagal di sini = pemasangan benar-benar gagal)
     if not (REMO / "node_modules" / "remotion").exists():
         sh(["npm", "install", "--no-audit", "--no-fund", "--loglevel=error"], cwd=REMO, timeout=900)
     if os.getenv("GITHUB_ACTIONS"):
